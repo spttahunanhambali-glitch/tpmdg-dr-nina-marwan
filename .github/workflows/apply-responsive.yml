@@ -1,0 +1,46 @@
+name: Apply responsive luxury CSS
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  responsive:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add responsive stylesheet link
+        shell: bash
+        run: |
+          set -e
+          test -f index.html
+          test -f responsive-luxury.css
+          if ! grep -q 'responsive-luxury.css' index.html; then
+            python - <<'PY'
+            from pathlib import Path
+            p = Path('index.html')
+            s = p.read_text(encoding='utf-8')
+            marker = '</head>'
+            if marker not in s:
+                raise SystemExit('Missing </head> marker')
+            s = s.replace(marker, '<link rel="stylesheet" href="responsive-luxury.css">' + marker, 1)
+            p.write_text(s, encoding='utf-8')
+            PY
+          fi
+
+      - name: Commit responsive layer
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html responsive-luxury.css
+          git diff --cached --quiet && exit 0
+          git commit -m 'Enable tablet and mobile responsive layer'
+          git push
