@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://drg-nina.netlify.app/sitemap.xml
