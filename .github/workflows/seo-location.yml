@@ -1,0 +1,37 @@
+name: Apply local SEO location data
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  seo:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update local business schema
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          s2 = s.replace('"telephone":"+6282371123042"', '"telephone":"+6281222886446"')
+          old='"address":{"@type":"PostalAddress","addressLocality":"Kota Jambi","addressRegion":"Jambi","addressCountry":"ID"},"sameAs":'
+          new='"address":{"@type":"PostalAddress","addressLocality":"Kota Jambi","addressRegion":"Jambi","addressCountry":"ID"},"geo":{"@type":"GeoCoordinates","latitude":-1.5902416,"longitude":103.6290277},"hasMap":"https://www.google.com/maps/place/drg.+Nina+Marwan/@-1.5902416,103.6264528,17z","sameAs":'
+          if old in s2 and '"geo":{"@type":"GeoCoordinates"' not in s2:
+              s2=s2.replace(old,new,1)
+          if s2 == s:
+              raise SystemExit('No SEO location changes were necessary')
+          p.write_text(s2, encoding='utf-8')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Improve local SEO location data' || exit 0
+          git push
