@@ -1,0 +1,8 @@
+.git/
+.github/
+netlify/
+node_modules/
+src/
+wrangler.jsonc
+netlify.toml
+README.md
