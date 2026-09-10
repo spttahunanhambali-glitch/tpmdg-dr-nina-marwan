@@ -1,0 +1,11 @@
+{
+  "name": "tpmdg-dr-nina-marwan",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^5.19.1"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^4.2.5"
+  }
+}
