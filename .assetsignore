@@ -3,6 +3,14 @@
 netlify/
 node_modules/
 src/
+functions/
 wrangler.jsonc
 netlify.toml
 README.md
+package.json
+package-lock.json
+*.ts
+*.tsx
+*.map
+.env
+.env.*
