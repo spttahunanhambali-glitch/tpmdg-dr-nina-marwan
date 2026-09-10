@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0a08">
+<meta name="description" content="Cabeku — Scan Kondisi Tanaman Cabai. Pemeriksaan awal berbasis foto dan data budidaya, bukan diagnosis penyakit.">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+<link rel="canonical" href="https://drg-nina.netlify.app/cabeku/">
+<title>Cabeku | Scan Kondisi Tanaman Cabai</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--black:#090908;--dark:#15120d;--gold:#c9a45c;--gold2:#efd59d;--ivory:#f7f1e7;--paper:#fffdf8;--ink:#1c1915;--muted:#71695f;--line:#e5ddce;--ok:#226847;--warn:#9a6810;--danger:#984333;--shadow:0 20px 60px rgba(40,29,12,.11);--r:24px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.65 'DM Sans',system-ui,sans-serif}a{text-decoration:none;color:inherit}button,input,select{font:inherit}.wrap{width:min(1120px,calc(100% - 32px));margin:auto}
+.header{background:linear-gradient(135deg,#080807,#1a140d);color:#fff;border-bottom:1px solid rgba(239,213,157,.2)}.nav{min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{display:flex;align-items:center;gap:12px}.mark{width:46px;height:46px;border:1px solid var(--gold);border-radius:15px;display:grid;place-items:center;color:var(--gold2);font:700 21px 'Playfair Display',serif}.brand b{display:block;font:600 1.1rem 'Playfair Display',serif}.brand small{display:block;color:#aaa196;font-size:.68rem}.back{border:1px solid rgba(239,213,157,.35);border-radius:999px;padding:9px 14px;color:var(--gold2);font-weight:800;font-size:.8rem}
+.hero{padding:65px 0 46px;background:radial-gradient(circle at 85% 18%,rgba(201,164,92,.18),transparent 28%),linear-gradient(135deg,#080807,#1d150e);color:#fff}.eyebrow{display:flex;align-items:center;gap:8px;color:var(--gold2);font-weight:900;text-transform:uppercase;letter-spacing:.15em;font-size:.7rem}.eyebrow i{width:30px;height:1px;background:var(--gold)}h1,h2,h3{font-family:'Playfair Display',Georgia,serif;line-height:1.08}h1{font-size:clamp(2.5rem,6vw,4.8rem);letter-spacing:-.04em;margin:16px 0}.hero p{max-width:730px;color:#cbc3b8;font-size:1.02rem}.notice{display:inline-flex;gap:8px;align-items:center;margin-top:19px;padding:9px 12px;border:1px solid rgba(239,213,157,.22);border-radius:999px;color:#d9cfbf;background:rgba(255,255,255,.035);font-size:.77rem}
+main{padding:42px 0 76px}.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px}.card{border:1px solid var(--line);border-radius:var(--r);background:#fff;padding:25px;box-shadow:var(--shadow)}.dark{background:linear-gradient(155deg,#0a0908,#19130c);color:#fff;border-color:rgba(239,213,157,.18)}h2{font-size:1.75rem;margin:0 0 9px}.muted{color:var(--muted)}.dark .muted{color:#afa79d}.section-gap{margin-top:18px}
+.upload{position:relative;border:1.5px dashed #cbb890;border-radius:20px;padding:24px;text-align:center;background:linear-gradient(180deg,#fffdf8,#faf3e6)}.upload input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.upload strong{display:block;font-size:1rem}.upload span{display:block;margin-top:5px;color:var(--muted);font-size:.82rem}.preview{display:none;margin-top:14px;border-radius:18px;overflow:hidden;background:#efe7d8}.preview img{display:block;width:100%;max-height:340px;object-fit:cover}.photo-meta{display:none;padding:10px 12px;font-size:.74rem;color:#625a50}
+.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-top:16px}.field{display:grid;gap:7px}.field.full{grid-column:1/-1}.field label{font-size:.76rem;font-weight:800;color:#585046}.field input,.field select{width:100%;border:1px solid var(--line);background:#fffdf9;border-radius:13px;padding:11px 12px;outline:none}.field input:focus,.field select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,164,92,.13)}.checks{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:5px}.check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:13px;padding:10px;background:#fffdf9}.check input{margin-top:4px;accent-color:#80602c}.check span{font-size:.79rem;color:#5e564c}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.btn{border:0;border-radius:999px;padding:12px 17px;font-weight:900;cursor:pointer}.primary{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#0b0a08}.ghost{border:1px solid #403426;background:transparent;color:#fff}.status{padding:18px;border-radius:18px;background:rgba(255,255,255,.045);border:1px solid rgba(239,213,157,.15)}.badge{display:inline-flex;padding:7px 11px;border-radius:999px;font-size:.72rem;font-weight:900;letter-spacing:.04em}.b-ok{background:#183a2d;color:#9fe0bd}.b-warn{background:#4d350f;color:#f3d696}.b-risk{background:#482119;color:#f0ad9d}.result-title{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.scoreline{margin:15px 0 10px;height:8px;border-radius:999px;background:#342a1d;overflow:hidden}.scoreline span{display:block;height:100%;width:0;background:var(--gold);transition:width .35s ease}.result-list{display:grid;gap:9px;margin-top:16px}.result-item{padding:12px 13px;border:1px solid rgba(239,213,157,.12);border-radius:14px;background:rgba(255,255,255,.025)}.result-item b{display:block;font-size:.8rem;color:var(--gold2)}.result-item span{display:block;color:#b7afa5;font-size:.78rem;margin-top:2px}.empty{color:#aaa198;font-size:.82rem}.source{margin-top:16px;padding:13px;border-left:2px solid var(--gold);color:#a9a096;font-size:.75rem}
+.footer{padding:25px 0;border-top:1px solid var(--line);color:#7c746a;font-size:.75rem}.footer strong{color:#4d463d}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.hero{padding-top:50px}.dark{order:-1}}
+@media(max-width:600px){.wrap{width:min(100% - 22px,1120px)}.nav{min-height:68px}.back{padding:8px 11px}.brand small{display:none}.formgrid,.checks{grid-template-columns:1fr}.field.full{grid-column:auto}.card{padding:19px}.upload{padding:20px}.actions .btn{width:100%}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="wrap nav">
+    <a class="brand" href="/" aria-label="Kembali ke TPMDG drg. Nina Marwan"><span class="mark">C</span><span><b>Cabeku</b><small>Asisten budidaya cabai</small></span></a>
+    <a class="back" href="/">← Kembali ke TPMDG</a>
+  </div>
+  <div class="hero">
+    <div class="wrap">
+      <div class="eyebrow"><i></i> Scan Kondisi Tanaman</div>
+      <h1>Kenali kondisi cabai<br>sebelum mengambil tindakan.</h1>
+      <p>Unggah foto tanaman, lalu lengkapi data dasar. Cabeku membantu menyusun pemeriksaan awal menjadi <strong>Sehat</strong>, <strong>Perlu Diamati</strong>, atau <strong>Perlu Pemeriksaan</strong>.</p>
+      <div class="notice">✦ Bukan diagnosis penyakit &nbsp;•&nbsp; Data tidak cukup = rekomendasi ditahan</div>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="wrap grid">
+<section class="card" aria-labelledby="scan-title">
+  <h2 id="scan-title">1. Foto tanaman</h2>
+  <p class="muted">Foto digunakan sebagai bahan pemeriksaan awal. Versi pertama Cabeku belum mengklaim mengenali penyakit dari gambar.</p>
+  <label class="upload" for="photo">
+    <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+    <strong>📷 Pilih atau ambil foto cabai</strong>
+    <span>JPG, PNG, atau WebP • maksimal 8 MB</span>
+  </label>
+  <div class="preview" id="preview"><img id="previewImg" alt="Pratinjau foto tanaman cabai"><div class="photo-meta" id="photoMeta"></div></div>
+
+  <div class="section-gap">
+    <h2>2. Data tanaman</h2>
+    <div class="formgrid">
+      <div class="field"><label for="hst">HST (hari setelah tanam)</label><input id="hst" type="number" min="0" max="500" inputmode="numeric" placeholder="contoh: 45"></div>
+      <div class="field"><label for="height">Tinggi tanaman (cm)</label><input id="height" type="number" min="0" max="500" step="0.1" inputmode="decimal" placeholder="contoh: 42"></div>
+      <div class="field"><label for="stem">Diameter batang (mm)</label><input id="stem" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="contoh: 6.5"></div>
+      <div class="field"><label for="soil">Kondisi tanah/media</label><select id="soil"><option value="">Pilih kondisi</option><option value="ideal">Gembur & cukup lembap</option><option value="dry">Cenderung kering</option><option value="wet">Terlalu basah/becek</option><option value="hard">Padat/keras</option><option value="unknown">Belum tahu</option></select></div>
+      <div class="field full"><label for="fert">Riwayat pupuk terakhir</label><select id="fert"><option value="">Belum diisi</option><option value="none">Belum dipupuk / tidak ingat</option><option value="npk">NPK</option><option value="organic">Pupuk organik</option><option value="mixed">NPK + organik</option></select></div>
+    </div>
+  </div>
+
+  <div class="section-gap">
+    <h2>3. Tanda visual yang terlihat</h2>
+    <p class="muted">Centang hanya yang benar-benar terlihat pada tanaman.</p>
+    <div class="checks">
+      <label class="check"><input type="checkbox" value="yellow"><span>Daun menguning</span></label>
+      <label class="check"><input type="checkbox" value="wilt"><span>Daun/tanaman layu</span></label>
+      <label class="check"><input type="checkbox" value="spot"><span>Bercak pada daun</span></label>
+      <label class="check"><input type="checkbox" value="curl"><span>Daun keriting</span></label>
+      <label class="check"><input type="checkbox" value="stunted"><span>Pertumbuhan tampak kerdil</span></label>
+      <label class="check"><input type="checkbox" value="fruit"><span>Buah berubah/terganggu</span></label>
+    </div>
+  </div>
+
+  <div class="actions"><button class="btn primary" id="scanBtn" type="button">Periksa kondisi tanaman</button><button class="btn ghost" id="resetBtn" type="button">Reset</button></div>
+</section>
+
+<aside class="card dark" aria-live="polite" aria-labelledby="result-heading">
+  <div class="result-title"><div><div class="eyebrow"><i></i> Hasil pemeriksaan</div><h2 id="result-heading">Belum diperiksa</h2></div><span class="badge" id="badge" style="display:none"></span></div>
+  <p class="muted" id="summary">Lengkapi data dasar dan pilih tanda visual yang benar-benar terlihat.</p>
+  <div class="scoreline"><span id="scoreBar"></span></div>
+  <div class="result-list" id="resultList"><div class="empty">Hasil akan muncul di sini. Cabeku tidak memaksakan kesimpulan saat data belum cukup.</div></div>
+  <div class="source"><strong>Prinsip Cabeku:</strong> hasil adalah pemeriksaan awal berbasis data. Untuk gejala berat, penyebaran cepat, atau kerusakan buah/tanaman yang signifikan, lakukan pemeriksaan lapangan dan gunakan SOP/sumber resmi sebelum menentukan perlakuan.</div>
+</aside>
+</div>
+</main>
+
+<footer class="footer"><div class="wrap"><strong>Cabeku</strong> • Modul Scan Kondisi Tanaman • Bagian dari ekosistem TPMDG drg. Nina Marwan</div></footer>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const photo=$('#photo'), preview=$('#preview'), previewImg=$('#previewImg'), photoMeta=$('#photoMeta');
+const scanBtn=$('#scanBtn'), resetBtn=$('#resetBtn'), resultHeading=$('#result-heading'), badge=$('#badge'), summary=$('#summary'), resultList=$('#resultList'), scoreBar=$('#scoreBar');
+
+function cleanNumber(id){const n=Number($(id).value);return Number.isFinite(n)&&n>=0?n:null}
+function selectedSymptoms(){return [...document.querySelectorAll('.check input:checked')].map(x=>x.value)}
+function setBadge(type,label){badge.style.display='inline-flex';badge.textContent=label;badge.className='badge '+({ok:'b-ok',warn:'b-warn',risk:'b-risk'}[type]||'b-warn')}
+function addResult(title,text){const el=document.createElement('div');el.className='result-item';const b=document.createElement('b');b.textContent=title;const s=document.createElement('span');s.textContent=text;el.append(b,s);resultList.append(el)}
+
+photo.addEventListener('change',()=>{
+  const file=photo.files?.[0];
+  if(!file){preview.style.display='none';return}
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>8*1024*1024){photo.value='';preview.style.display='none';alert('Foto harus JPG, PNG, atau WebP dan berukuran maksimal 8 MB.');return}
+  const url=URL.createObjectURL(file);previewImg.onload=()=>URL.revokeObjectURL(url);previewImg.src=url;preview.style.display='block';photoMeta.style.display='block';photoMeta.textContent=`${file.name} • ${(file.size/1024/1024).toFixed(2)} MB • diproses di perangkat ini`;
+});
+
+scanBtn.addEventListener('click',()=>{
+  const hst=cleanNumber('#hst'), height=cleanNumber('#height'), stem=cleanNumber('#stem'), soil=$('#soil').value, fert=$('#fert').value, symptoms=selectedSymptoms();
+  let risk=0;
+  if(symptoms.includes('wilt')) risk+=2;
+  if(symptoms.includes('spot')) risk+=2;
+  if(symptoms.includes('curl')) risk+=1;
+  if(symptoms.includes('fruit')) risk+=2;
+  if(symptoms.includes('yellow')) risk+=1;
+  if(symptoms.includes('stunted')) risk+=1;
+  if(soil==='wet') risk+=1;
+  if(soil==='hard') risk+=1;
+  if(!hst||!soil) risk=Math.max(risk,1);
+
+  resultList.replaceChildren();
+  scoreBar.style.width=Math.min(100,20+risk*11)+'%';
+
+  if(risk<=1){
+    resultHeading.textContent='Sehat / relatif stabil';setBadge('ok','SEHAT');summary.textContent='Belum terlihat kombinasi tanda yang mengharuskan pemeriksaan lebih lanjut dari data yang diisi.';
+  }else if(risk<=4){
+    resultHeading.textContent='Perlu diamati';setBadge('warn','PERLU DIAMATI');summary.textContent='Ada beberapa tanda yang layak dipantau. Jangan langsung menyimpulkan penyebab hanya dari foto atau satu gejala.';
+  }else{
+    resultHeading.textContent='Perlu pemeriksaan';setBadge('risk','PERLU PEMERIKSAAN');summary.textContent='Terdapat kombinasi tanda yang cukup kuat untuk pemeriksaan lapangan lebih lanjut.';
+  }
+
+  if(!photo.files?.[0]) addResult('Foto belum tersedia','Hasil visual otomatis belum dapat dilakukan. Lengkapi foto tanaman pada pemeriksaan berikutnya.');
+  else addResult('Foto diterima','Foto tersimpan sebagai pratinjau lokal; belum ada diagnosis AI pada versi modul ini.');
+  if(hst===null) addResult('HST belum diisi','Data umur tanaman diperlukan sebelum rekomendasi budidaya yang lebih spesifik.');
+  else addResult('Umur tanaman',`${hst} HST`);
+  if(height!==null) addResult('Tinggi tanaman',`${height} cm`); else addResult('Tinggi tanaman belum diisi','Belum cukup untuk membandingkan pertumbuhan secara lebih terukur.');
+  if(stem!==null) addResult('Diameter batang',`${stem} mm`);
+  const soilText={ideal:'gembur & cukup lembap',dry:'cenderung kering',wet:'terlalu basah/becek',hard:'padat/keras',unknown:'belum diketahui','':'belum diisi'}[soil];
+  addResult('Kondisi tanah/media',soilText);
+  if(symptoms.length) addResult('Tanda yang dicatat',symptoms.map(s=>({yellow:'daun menguning',wilt:'layu',spot:'bercak',curl:'keriting',stunted:'pertumbuhan kerdil',fruit:'gangguan buah'}[s])).join(', '));
+  else addResult('Tanda visual','Tidak ada tanda yang dicentang. Tetap lakukan pemantauan berkala.');
+
+  if(soil==='wet') addResult('Perhatian tanah','Media terlalu basah dapat memperburuk kondisi akar. Periksa drainase dan hindari tindakan pemupukan yang belum didukung data.');
+  if(soil==='dry') addResult('Perhatian tanah','Media cenderung kering. Pastikan kebutuhan air ditinjau bersama kondisi cuaca, fase tanaman, dan drainase.');
+  if(symptoms.includes('spot')||symptoms.includes('wilt')||symptoms.includes('fruit')) addResult('Langkah aman','Pisahkan tanaman yang sangat bergejala bila memungkinkan, amati pola penyebaran, dan lanjutkan ke pemeriksaan lapangan/SOP resmi.');
+
+  const canRecommend=(hst!==null&&soil&&fert);
+  if(!canRecommend){addResult('Kebutuhan NPK','DATA BELUM CUKUP — Cabeku sengaja tidak mengeluarkan dosis. Lengkapi HST, kondisi tanah/media, dan riwayat pupuk terlebih dahulu.');}
+  else{addResult('Kebutuhan NPK','Belum dihitung pada modul ini. Mesin rekomendasi dosis akan menggunakan HST + kondisi tanah + riwayat pupuk + SOP resmi, bukan perkiraan.');}
+  resultHeading.focus?.();
+});
+
+resetBtn.addEventListener('click',()=>{
+  document.querySelectorAll('input').forEach(i=>{if(i.type==='checkbox')i.checked=false;else i.value=''});$('#soil').value='';$('#fert').value='';photo.value='';preview.style.display='none';photoMeta.style.display='none';badge.style.display='none';scoreBar.style.width='0';resultHeading.textContent='Belum diperiksa';summary.textContent='Lengkapi data dasar dan pilih tanda visual yang benar-benar terlihat.';resultList.replaceChildren(Object.assign(document.createElement('div'),{className:'empty',textContent:'Hasil akan muncul di sini. Cabeku tidak memaksakan kesimpulan saat data belum cukup.'}));
+});
+</script>
+</body>
+</html>
