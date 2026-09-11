@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cabeku — Regression Test Foto Library</title>
+<style>
+:root{--bg:#f7f1e7;--card:#fffdf8;--ink:#1c1915;--muted:#71695f;--gold:#c9a45c;--line:#e5ddce;--dark:#0b0a08;--green:#2d7652;--amber:#a66d13;--red:#9b4a39}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}.wrap{width:min(1050px,calc(100% - 24px));margin:auto;padding:28px 0 50px}header{background:linear-gradient(135deg,#080807,#1d150e);color:#fff;padding:30px 0}h1{margin:0 0 7px;font-size:clamp(1.7rem,4vw,2.6rem)}p{margin:7px 0;color:var(--muted)}header p{color:#c8c0b5}.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px;margin-top:16px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.slot{border:1px dashed #ccb98f;border-radius:16px;padding:12px;background:#fffaf0}.slot b{display:block}.slot small{display:block;color:var(--muted);margin:3px 0 9px}.slot input{width:100%}.preview{margin-top:10px;display:none}.preview img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:12px;border:1px solid var(--line)}.meta{margin-top:5px;font-size:.75rem;color:var(--muted)}.formgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.field label{display:block;font-weight:800;font-size:.78rem;margin-bottom:5px}.field input,.field select{width:100%;border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.btn{border:0;border-radius:999px;padding:11px 16px;font-weight:900;cursor:pointer}.primary{background:linear-gradient(135deg,#efd59d,#c9a45c)}.secondary{border:1px solid var(--line);background:#f2e7d4}.status{margin-top:12px;color:var(--muted);font-size:.82rem}.results{display:grid;gap:10px}.result{border:1px solid var(--line);border-radius:15px;padding:13px;background:#fff}.result h3{margin:0 0 5px}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:.7rem;font-weight:900}.ok{background:#e5f2e9;color:#236247}.warn{background:#fbf0d9;color:#805e1b}.risk{background:#f8e4df;color:#8d4032}.data{background:#eee9df;color:#625a50}.obs{display:grid;gap:5px;margin-top:8px}.obs div{font-size:.8rem;padding-left:11px;position:relative}.obs div:before{content:'•';position:absolute;left:0;color:var(--gold)}pre{white-space:pre-wrap;word-break:break-word;background:#f4eee4;padding:10px;border-radius:10px;font-size:.7rem;overflow:auto}.note{border-left:3px solid var(--gold);padding-left:11px;color:#655e55;font-size:.8rem;margin-top:9px}@media(max-width:760px){.grid,.formgrid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>Cabeku — Regression Test</h1><p>Pengujian tiga foto Library yang sama terhadap endpoint <code>/api/cabeku-scan</code>. Halaman ini tidak menyimpan foto di browser atau server.</p></div></header>
+<main class="wrap">
+<section class="card"><h2>1. Pilih foto test</h2><p>Masukkan <b>ca.jpeg</b>, <b>ca1.jpeg</b>, dan <b>ca2.jpeg</b> dari Library/komputer. Masing-masing akan dikompresi sebelum dikirim.</p>
+<div class="grid">
+  <label class="slot"><b>Test A — ca.jpeg</b><small>Bibit di bedengan/media tanam</small><input id="f1" type="file" accept="image/jpeg,image/png,image/webp"><div class="preview" id="p1"><img alt="Preview ca.jpeg"><div class="meta"></div></div></label>
+  <label class="slot"><b>Test B — ca1.jpeg</b><small>Bibit muda + mulsa/media</small><input id="f2" type="file" accept="image/jpeg,image/png,image/webp"><div class="preview" id="p2"><img alt="Preview ca1.jpeg"><div class="meta"></div></div></label>
+  <label class="slot"><b>Test C — ca2.jpeg</b><small>Tray persemaian</small><input id="f3" type="file" accept="image/jpeg,image/png,image/webp"><div class="preview" id="p3"><img alt="Preview ca2.jpeg"><div class="meta"></div></div></label>
+</div></section>
+<section class="card"><h2>2. Konteks test yang sama</h2><div class="formgrid">
+<div class="field"><label for="hst">HST</label><input id="hst" type="number" min="0" max="500" value="20"></div>
+<div class="field"><label for="soil">Tanah/media</label><select id="soil"><option value="ideal">Gembur & cukup lembap</option><option value="dry">Cenderung kering</option><option value="wet">Terlalu basah/becek</option><option value="hard">Padat/keras</option><option value="unknown">Belum tahu</option></select></div>
+<div class="field"><label for="fert">Pupuk</label><select id="fert"><option value="none">Belum dipupuk / tidak ingat</option><option value="npk">NPK</option><option value="organic">Pupuk organik</option><option value="mixed">NPK + organik</option></select></div>
+</div><div class="actions"><button class="btn primary" id="run" type="button">Uji 3 foto</button><button class="btn secondary" id="clear" type="button">Reset</button></div><div id="status" class="status">Belum ada pengujian.</div></section>
+<section class="card"><h2>3. Hasil</h2><div id="results" class="results"><p>Hasil akan muncul setelah pengujian.</p></div></section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const MAX_BYTES = 8 * 1024 * 1024;
+  const files = [null, null, null];
+  const $ = (id) => document.getElementById(id);
+  const setStatus = (text) => $('status').textContent = text;
+  const labels = ['ca.jpeg','ca1.jpeg','ca2.jpeg'];
+
+  function bindPreview(index) {
+    const input = $('f' + (index + 1));
+    const box = $('p' + (index + 1));
+    input.addEventListener('change', () => {
+      const file = input.files?.[0] || null;
+      files[index] = file;
+      box.style.display = file ? 'block' : 'none';
+      if (!file) return;
+      box.querySelector('img').src = URL.createObjectURL(file);
+      box.querySelector('.meta').textContent = `${file.name} • ${(file.size/1024/1024).toFixed(2)} MB`;
+    });
+  }
+  [0,1,2].forEach(bindPreview);
+
+  async function toDataUrl(file) {
+    if (!file) throw new Error('Foto belum dipilih.');
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('Format foto harus JPG, PNG, atau WebP.');
+    if (file.size > MAX_BYTES) throw new Error('Foto melebihi 8 MB.');
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve,reject) => {
+        const el = new Image(); el.onload=()=>resolve(el); el.onerror=()=>reject(new Error('Foto tidak dapat dibaca.')); el.src=url;
+      });
+      const max = 1280;
+      const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas tidak tersedia.');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg',0.78);
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  function statusClass(status) {
+    return status === 'Sehat' ? 'ok' : status === 'Perlu Diamati' ? 'warn' : status === 'Perlu Pemeriksaan' ? 'risk' : 'data';
+  }
+
+  function renderResult(index, review, error) {
+    const el = document.createElement('article'); el.className='result';
+    if (error) { el.innerHTML = `<h3>Foto ${index+1} — ${labels[index]}</h3><span class="badge data">ERROR</span><p>${escapeHtml(error)}</p>`; return el; }
+    const obs = Array.isArray(review.observations) ? review.observations : [];
+    el.innerHTML = `<h3>Foto ${index+1} — ${labels[index]}</h3><span class="badge ${statusClass(review.status)}">${escapeHtml(review.status || 'Data Belum Cukup')}</span><p><b>Confidence:</b> ${Number(review.confidence||0)}% &nbsp; <b>Quality:</b> ${escapeHtml(review.photo_quality||'-')}</p><div class="obs">${obs.map(x=>`<div>${escapeHtml(String(x))}</div>`).join('')}</div><div class="note">${escapeHtml(review.caution || 'Pemeriksaan visual awal; bukan diagnosis.')}</div><pre>${escapeHtml(JSON.stringify(review,null,2))}</pre>`;
+    return el;
+  }
+
+  function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c])); }
+
+  $('run').addEventListener('click', async () => {
+    if (files.every((f)=>!f)) { setStatus('Pilih minimal satu foto.'); return; }
+    $('run').disabled = true; $('results').replaceChildren();
+    const context = { hst: Number($('hst').value), soil: $('soil').value, fertilization: $('fert').value, symptoms: [] };
+    let done = 0;
+    for (let i=0;i<files.length;i+=1) {
+      if (!files[i]) continue;
+      setStatus(`Memeriksa ${i+1}/3: ${labels[i]} …`);
+      try {
+        const imageDataUrl = await toDataUrl(files[i]);
+        const response = await fetch('/api/cabeku-scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({imageDataUrl,context}) });
+        let data = null; try { data = await response.json(); } catch { throw new Error('Respons server bukan JSON.'); }
+        if (!response.ok || !data?.ok || !data.review) throw new Error(data?.error || `HTTP ${response.status}`);
+        $('results').append(renderResult(i,data.review,''));
+      } catch (error) {
+        $('results').append(renderResult(i,null,error instanceof Error ? error.message : 'Gagal memeriksa.'));
+      }
+      done += 1;
+    }
+    setStatus(`Selesai: ${done} foto diuji.`); $('run').disabled = false;
+  });
+
+  $('clear').addEventListener('click', ()=>window.location.reload());
+})();
+</script>
+</body>
+</html>
