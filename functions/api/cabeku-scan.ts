@@ -29,6 +29,7 @@ const ALLOWED_STATUS = new Set([
   "Perlu Pemeriksaan",
   "Data Belum Cukup",
 ]);
+const RUNTIME_VERSION = "cabeku-cf-v3-2026-09-11";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -37,6 +38,7 @@ function json(data: unknown, status = 200): Response {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      "x-cabeku-runtime": RUNTIME_VERSION,
     },
   });
 }
@@ -219,13 +221,13 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) {
-      return json({ error: "OPENAI_API_KEY belum tersedia di environment Cloudflare." }, 500);
+      return json({ error: "CABEKU_CF_MISSING_KEY: OPENAI_API_KEY belum tersedia di environment Cloudflare." }, 500);
     }
 
     const body = (await request.json()) as ScanRequest;
     const imageDataUrl = typeof body.imageDataUrl === "string" ? body.imageDataUrl : "";
     if (!isValidDataUrl(imageDataUrl)) {
-      return json({ error: "Foto tidak valid. Gunakan JPG, PNG, atau WebP maksimal 5 MB setelah kompresi." }, 400);
+      return json({ error: "CABEKU_CF_INVALID_IMAGE: Foto tidak valid. Gunakan JPG, PNG, atau WebP maksimal 5 MB setelah kompresi." }, 400);
     }
 
     const context = body.context && typeof body.context === "object" ? body.context : {};
@@ -268,7 +270,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const rawText = await completionResponse.text();
     if (!completionResponse.ok) {
       console.error("Cabeku OpenAI error", completionResponse.status, rawText.slice(0, 1000));
-      return json({ error: "Layanan pemeriksaan AI gagal merespons." }, 502);
+      return json({ error: `CABEKU_CF_OPENAI_ERROR: Layanan pemeriksaan AI gagal merespons (${completionResponse.status}).` }, 502);
     }
 
     let completion: unknown;
@@ -276,26 +278,27 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       completion = JSON.parse(rawText);
     } catch {
       console.error("Cabeku OpenAI invalid response", rawText.slice(0, 1000));
-      return json({ error: "Respons layanan AI tidak valid." }, 502);
+      return json({ error: "CABEKU_CF_INVALID_OPENAI_RESPONSE: Respons layanan AI tidak valid." }, 502);
     }
 
     const message = (completion as Record<string, any>)?.choices?.[0]?.message;
     const rawContent = message?.content;
     if (message?.refusal) {
       console.error("Cabeku AI refusal", String(message.refusal).slice(0, 800));
-      return json({ error: "AI menolak memproses foto tersebut. Coba foto tanaman yang lebih jelas." }, 502);
+      return json({ error: "CABEKU_CF_AI_REFUSAL: AI menolak memproses foto tersebut. Coba foto tanaman yang lebih jelas." }, 502);
     }
     if (rawContent === null || rawContent === undefined) {
-      return json({ error: "Model tidak mengembalikan hasil pemeriksaan." }, 502);
+      return json({ error: "CABEKU_CF_EMPTY_MODEL_RESULT: Model tidak mengembalikan hasil pemeriksaan." }, 502);
     }
 
     const review = parseModelReview(rawContent);
     if (!review) {
       console.error("Cabeku AI parse error", {
+        runtime: RUNTIME_VERSION,
         contentType: typeof rawContent,
         preview: typeof rawContent === "string" ? rawContent.slice(0, 1200) : rawContent,
       });
-      return json({ error: "AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
+      return json({ error: "CABEKU_CF_PARSE_ERROR: AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
     }
 
     if (review.photo_quality === "poor") {
@@ -309,10 +312,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       ];
     }
 
-    return json({ ok: true, review });
+    return json({ ok: true, runtime: RUNTIME_VERSION, review });
   } catch (error) {
     console.error("Cabeku Cloudflare function error", error);
-    return json({ error: "Pemeriksaan foto gagal diproses. Coba lagi." }, 500);
+    return json({ error: "CABEKU_CF_RUNTIME_ERROR: Pemeriksaan foto gagal diproses. Coba lagi." }, 500);
   }
 };
 
