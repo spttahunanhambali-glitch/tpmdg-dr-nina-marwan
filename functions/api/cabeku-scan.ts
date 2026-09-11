@@ -141,7 +141,12 @@ function unwrapReview(value: unknown): unknown | null {
   let current = parseJsonLoose(value);
   for (let i = 0; i < 4 && current && typeof current === "object"; i += 1) {
     const record = current as Record<string, unknown>;
-    if (typeof record.status === "string" || Array.isArray(record.observations)) return record;
+    if (
+      typeof record.status === "string"
+      || Array.isArray(record.observations)
+      || typeof record.photo_quality === "string"
+    ) return record;
+
     const candidates = [
       record.review,
       record.result,
@@ -190,11 +195,25 @@ function getPrompt(contextRecord: Record<string, unknown>, symptoms: string[]): 
     "Gunakan status: Sehat, Perlu Diamati, Perlu Pemeriksaan, Data Belum Cukup.",
     "Gunakan Data Belum Cukup bila objek tidak jelas, buram/gelap, atau bagian penting tanaman tidak terlihat.",
     "Observasi harus berbasis yang terlihat: warna daun, bentuk daun, layu, bercak, kerusakan buah, kondisi tajuk, dan kualitas foto. Jangan menebak.",
-    "Kembalikan SATU objek JSON saja tanpa markdown, tanpa backtick, tanpa teks pembuka/penutup.",
-    '{"photo_quality":"good|fair|poor","status":"Sehat|Perlu Diamati|Perlu Pemeriksaan|Data Belum Cukup","confidence":0,"observations":["..."],"caution":"...","next_steps":["..."]}',
+    "Confidence harus 0-100.",
+    "Kembalikan tepat enam field sesuai schema. Jangan menambah field lain.",
     `Data tambahan: HST=${String(contextRecord.hst ?? "tidak diisi")}; tanah=${String(contextRecord.soil ?? "tidak diisi")}; pupuk=${String(contextRecord.fertilization ?? "tidak diisi")}; tanda=${symptoms.join(", ") || "tidak ada"}.`,
   ].join("\n");
 }
+
+const RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    photo_quality: { type: "string", enum: ["good", "fair", "poor"] },
+    status: { type: "string", enum: ["Sehat", "Perlu Diamati", "Perlu Pemeriksaan", "Data Belum Cukup"] },
+    confidence: { type: "number", minimum: 0, maximum: 100 },
+    observations: { type: "array", items: { type: "string" }, maxItems: 6 },
+    caution: { type: "string", maxLength: 500 },
+    next_steps: { type: "array", items: { type: "string" }, maxItems: 5 },
+  },
+  required: ["photo_quality", "status", "confidence", "observations", "caution", "next_steps"],
+};
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
@@ -223,7 +242,14 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "cabeku_visual_review",
+            strict: true,
+            schema: RESPONSE_SCHEMA,
+          },
+        },
         temperature: 0.1,
         max_tokens: 700,
         messages: [
@@ -253,7 +279,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       return json({ error: "Respons layanan AI tidak valid." }, 502);
     }
 
-    const rawContent = (completion as any)?.choices?.[0]?.message?.content;
+    const message = (completion as Record<string, any>)?.choices?.[0]?.message;
+    const rawContent = message?.content;
+    if (message?.refusal) {
+      console.error("Cabeku AI refusal", String(message.refusal).slice(0, 800));
+      return json({ error: "AI menolak memproses foto tersebut. Coba foto tanaman yang lebih jelas." }, 502);
+    }
     if (rawContent === null || rawContent === undefined) {
       return json({ error: "Model tidak mengembalikan hasil pemeriksaan." }, 502);
     }
