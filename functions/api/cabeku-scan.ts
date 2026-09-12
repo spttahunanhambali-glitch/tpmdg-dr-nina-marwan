@@ -1,15 +1,21 @@
-type Env = {
-  OPENAI_API_KEY?: string;
+import { assessGrowth, growthReferenceMeta, type GrowthMeasures, type GrowthVariety } from "./growth-engine";
+
+type Env = { OPENAI_API_KEY?: string };
+
+type ScanContext = {
+  hst?: unknown;
+  soil?: unknown;
+  fertilization?: unknown;
+  symptoms?: unknown;
+  variety?: unknown;
+  measurements?: unknown;
+  morphology?: unknown;
 };
 
 type ScanRequest = {
   imageDataUrl?: unknown;
-  context?: {
-    hst?: unknown;
-    soil?: unknown;
-    fertilization?: unknown;
-    symptoms?: unknown;
-  };
+  imageDataUrls?: unknown;
+  context?: ScanContext;
 };
 
 type VisualReview = {
@@ -22,6 +28,8 @@ type VisualReview = {
 };
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGES = 5;
+const MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_STATUS = new Set([
   "Sehat",
@@ -29,7 +37,7 @@ const ALLOWED_STATUS = new Set([
   "Perlu Pemeriksaan",
   "Data Belum Cukup",
 ]);
-const RUNTIME_VERSION = "cabeku-cf-v3-2026-09-11";
+const RUNTIME_VERSION = "cabeku-cf-v4-growth-2026-09-12";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -43,81 +51,80 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function estimatedDataUrlBytes(value: string): number {
+  const comma = value.indexOf(",");
+  if (comma < 0) return 0;
+  const base64 = value.slice(comma + 1);
+  return Math.floor((base64.length * 3) / 4)
+    - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+}
+
 function isValidDataUrl(value: string): boolean {
   const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(value);
   if (!match || !ALLOWED_MIME.has(match[1])) return false;
-  const base64 = match[2];
-  const estimatedBytes = Math.floor((base64.length * 3) / 4)
-    - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
-  return estimatedBytes > 0 && estimatedBytes <= MAX_IMAGE_BYTES;
+  const bytes = estimatedDataUrlBytes(value);
+  return bytes > 0 && bytes <= MAX_IMAGE_BYTES;
+}
+
+function normalizeImages(body: ScanRequest): string[] {
+  const candidates: unknown[] = Array.isArray(body.imageDataUrls)
+    ? body.imageDataUrls
+    : typeof body.imageDataUrl === "string"
+      ? [body.imageDataUrl]
+      : [];
+
+  return candidates
+    .filter((value): value is string => typeof value === "string")
+    .slice(0, MAX_IMAGES);
 }
 
 function clampConfidence(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : 0;
 }
 
 function sanitizeReview(value: unknown): VisualReview {
   const input = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  const quality = input.photo_quality === "good"
-    || input.photo_quality === "fair"
-    || input.photo_quality === "poor"
+  const quality = input.photo_quality === "good" || input.photo_quality === "fair" || input.photo_quality === "poor"
     ? input.photo_quality
     : "poor";
   const rawStatus = typeof input.status === "string" ? input.status : "Data Belum Cukup";
-  const status = ALLOWED_STATUS.has(rawStatus)
-    ? (rawStatus as VisualReview["status"])
-    : "Data Belum Cukup";
+  const status = ALLOWED_STATUS.has(rawStatus) ? rawStatus as VisualReview["status"] : "Data Belum Cukup";
   const observations = Array.isArray(input.observations)
-    ? input.observations.filter((x): x is string => typeof x === "string").slice(0, 6)
+    ? input.observations.filter((item): item is string => typeof item === "string").slice(0, 6)
     : [];
   const nextSteps = Array.isArray(input.next_steps)
-    ? input.next_steps.filter((x): x is string => typeof x === "string").slice(0, 5)
+    ? input.next_steps.filter((item): item is string => typeof item === "string").slice(0, 5)
     : [];
   const caution = typeof input.caution === "string"
     ? input.caution.slice(0, 500)
     : "Hasil ini adalah pemeriksaan visual awal dan bukan diagnosis.";
 
-  return {
-    photo_quality: quality,
-    status,
-    confidence: clampConfidence(input.confidence),
-    observations,
-    caution,
-    next_steps: nextSteps,
-  };
+  return { photo_quality: quality, status, confidence: clampConfidence(input.confidence), observations, caution, next_steps: nextSteps };
 }
 
 function stripCodeFence(value: string): string {
-  return value
-    .replace(/^\s*```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
+  return value.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 }
 
 function extractFirstJsonObject(value: string): string | null {
   const source = stripCodeFence(value);
   const start = source.indexOf("{");
   if (start < 0) return null;
-
   let depth = 0;
   let inString = false;
   let escaped = false;
-
-  for (let i = start; i < source.length; i += 1) {
-    const char = source[i];
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
     if (inString) {
       if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
       continue;
     }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-    if (char === "{") depth += 1;
-    if (char === "}" && --depth === 0) return source.slice(start, i + 1);
+    if (character === '"') { inString = true; continue; }
+    if (character === "{") depth += 1;
+    if (character === "}" && --depth === 0) return source.slice(start, index + 1);
   }
   return null;
 }
@@ -126,43 +133,11 @@ function parseJsonLoose(value: unknown): unknown | null {
   if (value && typeof value === "object") return value;
   if (typeof value !== "string") return null;
   const trimmed = stripCodeFence(value);
-  try {
-    return JSON.parse(trimmed);
-  } catch {
+  try { return JSON.parse(trimmed); } catch {
     const extracted = extractFirstJsonObject(trimmed);
     if (!extracted) return null;
-    try {
-      return JSON.parse(extracted);
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(extracted); } catch { return null; }
   }
-}
-
-function unwrapReview(value: unknown): unknown | null {
-  let current = parseJsonLoose(value);
-  for (let i = 0; i < 4 && current && typeof current === "object"; i += 1) {
-    const record = current as Record<string, unknown>;
-    if (
-      typeof record.status === "string"
-      || Array.isArray(record.observations)
-      || typeof record.photo_quality === "string"
-    ) return record;
-
-    const candidates = [
-      record.review,
-      record.result,
-      record.output,
-      record.data,
-      record.response,
-      record.content,
-      record.text,
-    ];
-    const next = candidates.find((candidate) => candidate !== undefined && candidate !== null);
-    if (next === undefined) return record;
-    current = parseJsonLoose(next);
-  }
-  return current;
 }
 
 function parseModelReview(content: unknown): VisualReview | null {
@@ -178,28 +153,63 @@ function parseModelReview(content: unknown): VisualReview | null {
   }
 
   for (const candidate of candidates) {
-    const unwrapped = unwrapReview(candidate);
-    if (!unwrapped || typeof unwrapped !== "object") continue;
-    const review = sanitizeReview(unwrapped);
-    const raw = unwrapped as Record<string, unknown>;
-    const looksValid = typeof raw.status === "string"
-      || Array.isArray(raw.observations)
-      || typeof raw.photo_quality === "string";
-    if (looksValid) return review;
+    let current = parseJsonLoose(candidate);
+    for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+      const record = current as Record<string, unknown>;
+      if (typeof record.status === "string" || Array.isArray(record.observations) || typeof record.photo_quality === "string") {
+        return sanitizeReview(record);
+      }
+      const nested = [record.review, record.result, record.output, record.data, record.response, record.content, record.text]
+        .find((item) => item !== undefined && item !== null);
+      if (nested === undefined) break;
+      current = parseJsonLoose(nested);
+    }
   }
   return null;
 }
 
-function getPrompt(contextRecord: Record<string, unknown>, symptoms: string[]): string {
+function positiveNumber(value: unknown, max: number): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > max) return null;
+  return number;
+}
+
+function normalizeGrowthContext(context: ScanContext | undefined): {
+  hst: number | null;
+  variety: GrowthVariety;
+  measures: GrowthMeasures;
+} {
+  const hst = positiveNumber(context?.hst, 500) === null ? null : positiveNumber(context?.hst, 500);
+  const rawVariety = typeof context?.variety === "string" ? context.variety : "unknown";
+  const variety: GrowthVariety = rawVariety === "rawit" || rawVariety === "merah" || rawVariety === "keriting" ? rawVariety : "unknown";
+  const measurements = context?.measurements && typeof context.measurements === "object"
+    ? context.measurements as Record<string, unknown>
+    : {};
+
+  return {
+    hst,
+    variety,
+    measures: {
+      heightCm: positiveNumber(measurements.heightCm, 500),
+      canopyCm: positiveNumber(measurements.canopyCm, 500),
+      leafCount: positiveNumber(measurements.leafCount, 1000),
+      leafWidthCm: positiveNumber(measurements.leafWidthCm, 100),
+    },
+  };
+}
+
+function getPrompt(contextRecord: Record<string, unknown>, symptoms: string[], photoCount: number): string {
   return [
     "Anda adalah modul pemeriksaan visual awal untuk aplikasi budidaya tanaman cabai di Indonesia.",
-    "Hanya amati foto. Jangan menegakkan diagnosis penyakit, jangan menyebut patogen secara pasti, jangan memberi dosis pupuk, pestisida, fungisida, insektisida, atau bahan kimia.",
+    "Hanya amati foto. Jangan menegakkan diagnosis penyakit dan jangan menyebut patogen sebagai kepastian.",
+    "Jangan memberi dosis pupuk, pestisida, fungisida, insektisida, atau bahan kimia.",
     "Gunakan status: Sehat, Perlu Diamati, Perlu Pemeriksaan, Data Belum Cukup.",
-    "Gunakan Data Belum Cukup bila objek tidak jelas, buram/gelap, atau bagian penting tanaman tidak terlihat.",
-    "Observasi harus berbasis yang terlihat: warna daun, bentuk daun, layu, bercak, kerusakan buah, kondisi tajuk, dan kualitas foto. Jangan menebak.",
-    "Confidence harus 0-100.",
-    "Kembalikan tepat enam field sesuai schema. Jangan menambah field lain.",
-    `Data tambahan: HST=${String(contextRecord.hst ?? "tidak diisi")}; tanah=${String(contextRecord.soil ?? "tidak diisi")}; pupuk=${String(contextRecord.fertilization ?? "tidak diisi")}; tanda=${symptoms.join(", ") || "tidak ada"}.`,
+    "Gunakan Data Belum Cukup bila objek tidak jelas, foto buram/gelap, atau bagian penting tanaman tidak terlihat.",
+    "Observasi harus berbasis yang terlihat: warna daun, bentuk daun, layu, bercak, kerusakan buah, kondisi tajuk, dan kualitas foto.",
+    "Analisis semua foto sebagai satu konteks tanaman; jangan mencampur tanaman berbeda tanpa bukti konteks.",
+    "Confidence harus 0-100. Kembalikan tepat enam field sesuai schema.",
+    `Jumlah foto=${photoCount}; HST=${String(contextRecord.hst ?? "tidak diisi")}; tanah=${String(contextRecord.soil ?? "tidak diisi")}; pupuk=${String(contextRecord.fertilization ?? "tidak diisi")}; tanda=${symptoms.join(", ") || "tidak ada"}.`,
   ].join("\n");
 }
 
@@ -220,49 +230,45 @@ const RESPONSE_SCHEMA = {
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
     const apiKey = env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return json({ error: "CABEKU_CF_MISSING_KEY: OPENAI_API_KEY belum tersedia di environment Cloudflare." }, 500);
-    }
+    if (!apiKey) return json({ error: "CABEKU_CF_MISSING_KEY: OPENAI_API_KEY belum tersedia di environment Cloudflare." }, 500);
 
-    const body = (await request.json()) as ScanRequest;
-    const imageDataUrl = typeof body.imageDataUrl === "string" ? body.imageDataUrl : "";
-    if (!isValidDataUrl(imageDataUrl)) {
-      return json({ error: "CABEKU_CF_INVALID_IMAGE: Foto tidak valid. Gunakan JPG, PNG, atau WebP maksimal 5 MB setelah kompresi." }, 400);
+    let body: ScanRequest;
+    try { body = await request.json() as ScanRequest; }
+    catch { return json({ error: "CABEKU_CF_INVALID_JSON: Body JSON tidak valid." }, 400); }
+
+    const images = normalizeImages(body);
+    if (!images.length) return json({ error: "CABEKU_CF_INVALID_IMAGE: Minimal 1 foto diperlukan." }, 400);
+    if (images.length > MAX_IMAGES) return json({ error: "CABEKU_CF_TOO_MANY_IMAGES: Maksimal 5 foto per scan." }, 400);
+
+    let totalBytes = 0;
+    for (const image of images) {
+      if (!isValidDataUrl(image)) return json({ error: "CABEKU_CF_INVALID_IMAGE: Foto harus JPG, PNG, atau WebP dan maksimal 5 MB per foto." }, 400);
+      totalBytes += estimatedDataUrlBytes(image);
     }
+    if (totalBytes > MAX_TOTAL_IMAGE_BYTES) return json({ error: "CABEKU_CF_IMAGE_PAYLOAD_TOO_LARGE: Total payload foto terlalu besar. Kurangi jumlah/ukuran foto." }, 413);
 
     const context = body.context && typeof body.context === "object" ? body.context : {};
     const contextRecord = context as Record<string, unknown>;
     const symptoms = Array.isArray(contextRecord.symptoms)
-      ? contextRecord.symptoms.filter((x): x is string => typeof x === "string").slice(0, 10)
+      ? contextRecord.symptoms.filter((item): item is string => typeof item === "string").slice(0, 10)
       : [];
+
+    const userContent: Array<Record<string, unknown>> = [
+      { type: "text", text: "Periksa seluruh foto tanaman cabai ini sebagai satu kasus sesuai aturan di atas." },
+      ...images.map((image) => ({ type: "image_url", image_url: { url: image, detail: "low" } })),
+    ];
 
     const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "cabeku_visual_review",
-            strict: true,
-            schema: RESPONSE_SCHEMA,
-          },
-        },
+        response_format: { type: "json_schema", json_schema: { name: "cabeku_visual_review", strict: true, schema: RESPONSE_SCHEMA } },
         temperature: 0.1,
         max_tokens: 700,
         messages: [
-          { role: "system", content: getPrompt(contextRecord, symptoms) },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Periksa foto tanaman cabai ini sesuai aturan di atas." },
-              { type: "image_url", image_url: { url: imageDataUrl, detail: "low" } },
-            ],
-          },
+          { role: "system", content: getPrompt(contextRecord, symptoms, images.length) },
+          { role: "user", content: userContent },
         ],
       }),
     });
@@ -274,45 +280,38 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
 
     let completion: unknown;
-    try {
-      completion = JSON.parse(rawText);
-    } catch {
-      console.error("Cabeku OpenAI invalid response", rawText.slice(0, 1000));
-      return json({ error: "CABEKU_CF_INVALID_OPENAI_RESPONSE: Respons layanan AI tidak valid." }, 502);
-    }
+    try { completion = JSON.parse(rawText); }
+    catch { return json({ error: "CABEKU_CF_INVALID_OPENAI_RESPONSE: Respons layanan AI tidak valid." }, 502); }
 
-    const message = (completion as Record<string, any>)?.choices?.[0]?.message;
-    const rawContent = message?.content;
-    if (message?.refusal) {
-      console.error("Cabeku AI refusal", String(message.refusal).slice(0, 800));
-      return json({ error: "CABEKU_CF_AI_REFUSAL: AI menolak memproses foto tersebut. Coba foto tanaman yang lebih jelas." }, 502);
-    }
-    if (rawContent === null || rawContent === undefined) {
-      return json({ error: "CABEKU_CF_EMPTY_MODEL_RESULT: Model tidak mengembalikan hasil pemeriksaan." }, 502);
-    }
+    const message = (completion as Record<string, unknown>)?.choices && Array.isArray((completion as Record<string, unknown>).choices)
+      ? ((completion as Record<string, unknown>).choices as Array<Record<string, unknown>>)[0]?.message as Record<string, unknown> | undefined
+      : undefined;
+    if (message?.refusal) return json({ error: "CABEKU_CF_AI_REFUSAL: AI menolak memproses foto tersebut." }, 502);
 
-    const review = parseModelReview(rawContent);
-    if (!review) {
-      console.error("Cabeku AI parse error", {
-        runtime: RUNTIME_VERSION,
-        contentType: typeof rawContent,
-        preview: typeof rawContent === "string" ? rawContent.slice(0, 1200) : rawContent,
-      });
-      return json({ error: "CABEKU_CF_PARSE_ERROR: AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
-    }
+    const review = parseModelReview(message?.content);
+    if (!review) return json({ error: "CABEKU_CF_PARSE_ERROR: AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
 
     if (review.photo_quality === "poor") {
       review.status = "Data Belum Cukup";
       review.confidence = Math.min(review.confidence, 45);
-      review.caution = "Foto belum cukup jelas untuk pemeriksaan visual yang bertanggung jawab. Ambil foto lebih terang dan fokus, serta tampilkan daun dan buah bila ada.";
-      review.next_steps = [
-        "Ambil foto ulang dengan cahaya cukup",
-        "Tampilkan seluruh tanaman atau bagian bergejala",
-        "Lengkapi data HST dan kondisi tanah/media",
-      ];
+      review.caution = "Foto belum cukup jelas untuk pemeriksaan visual yang bertanggung jawab. Ambil foto lebih terang dan fokus.";
+      review.next_steps = ["Ambil foto ulang dengan cahaya cukup", "Tampilkan bagian tanaman yang bergejala", "Lengkapi data HST dan kondisi tanah/media"];
     }
 
-    return json({ ok: true, runtime: RUNTIME_VERSION, review });
+    const growthContext = normalizeGrowthContext(context);
+    const growth = assessGrowth(growthContext.hst, growthContext.variety, growthContext.measures);
+
+    return json({
+      ok: true,
+      runtime: RUNTIME_VERSION,
+      review,
+      growth,
+      audit: {
+        engine: "cabeku-growth-engine-v1",
+        reference: growthReferenceMeta(),
+        benchmarkSource: growth.benchmark?.sourceId ?? null,
+      },
+    });
   } catch (error) {
     console.error("Cabeku Cloudflare function error", error);
     return json({ error: "CABEKU_CF_RUNTIME_ERROR: Pemeriksaan foto gagal diproses. Coba lagi." }, 500);
@@ -321,5 +320,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
 export const onRequest: PagesFunction<Env> = async ({ request }) => {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  return json({ error: "Gunakan POST /api/cabeku-scan." }, 405);
+  return onRequestPost as unknown as Promise<Response>;
 };
