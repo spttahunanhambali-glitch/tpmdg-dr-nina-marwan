@@ -10,7 +10,7 @@ const MAX_IMAGES = 5;
 const MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_STATUS = new Set(["Sehat", "Perlu Diamati", "Perlu Pemeriksaan", "Data Belum Cukup"]);
-const RUNTIME_VERSION = "cabeku-cf-v4-growth-2026-09-12";
+const RUNTIME_VERSION = "cabeku-cf-v4-growth-2026-09-12-jsonfix";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -55,13 +55,20 @@ function sanitizeReview(value: unknown): VisualReview {
 }
 
 function stripCodeFence(value: string): string {
-  return value.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  return value.replace(/^\uFEFF/, "").replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 }
 
-function extractFirstJsonObject(value: string): string | null {
+function extractFirstJsonValue(value: string): string | null {
   const source = stripCodeFence(value);
-  const start = source.indexOf("{");
+  const objectStart = source.indexOf("{");
+  const arrayStart = source.indexOf("[");
+  let start = -1;
+  if (objectStart >= 0 && arrayStart >= 0) start = Math.min(objectStart, arrayStart);
+  else start = objectStart >= 0 ? objectStart : arrayStart;
   if (start < 0) return null;
+
+  const opening = source[start];
+  const closing = opening === "{" ? "}" : "]";
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -74,8 +81,11 @@ function extractFirstJsonObject(value: string): string | null {
       continue;
     }
     if (character === '"') { inString = true; continue; }
-    if (character === "{") depth += 1;
-    if (character === "}" && --depth === 0) return source.slice(start, index + 1);
+    if (character === opening) depth += 1;
+    if (character === closing) {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
   }
   return null;
 }
@@ -83,33 +93,56 @@ function extractFirstJsonObject(value: string): string | null {
 function parseJsonLoose(value: unknown): unknown | null {
   if (value && typeof value === "object") return value;
   if (typeof value !== "string") return null;
+
   const trimmed = stripCodeFence(value);
-  try { return JSON.parse(trimmed); } catch {
-    const extracted = extractFirstJsonObject(trimmed);
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "string") {
+      try { return JSON.parse(stripCodeFence(parsed)) as unknown; } catch { return parsed; }
+    }
+    return parsed;
+  } catch {
+    const extracted = extractFirstJsonValue(trimmed);
     if (!extracted) return null;
-    try { return JSON.parse(extracted); } catch { return null; }
+    try { return JSON.parse(extracted) as unknown; } catch { return null; }
   }
 }
 
-function parseModelReview(content: unknown): VisualReview | null {
+function collectContentCandidates(content: unknown): unknown[] {
   const candidates: unknown[] = [content];
   if (Array.isArray(content)) {
     for (const part of content) {
       if (typeof part === "string") candidates.push(part);
       if (part && typeof part === "object") {
         const record = part as Record<string, unknown>;
-        candidates.push(record.text, record.content, record.value);
+        candidates.push(record.text, record.content, record.value, record.json);
       }
     }
   }
-  for (const candidate of candidates) {
-    let current = parseJsonLoose(candidate);
-    for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
-      const record = current as Record<string, unknown>;
-      if (typeof record.status === "string" || Array.isArray(record.observations) || typeof record.photo_quality === "string") return sanitizeReview(record);
-      const nested = [record.review, record.result, record.output, record.data, record.response, record.content, record.text].find((item) => item !== undefined && item !== null);
-      if (nested === undefined) break;
-      current = parseJsonLoose(nested);
+  return candidates.filter((candidate) => candidate !== undefined && candidate !== null);
+}
+
+function parseModelReview(content: unknown): VisualReview | null {
+  for (const candidate of collectContentCandidates(content)) {
+    let current: unknown = candidate;
+    for (let depth = 0; depth < 6; depth += 1) {
+      const parsed = parseJsonLoose(current);
+      if (parsed === null) break;
+      current = parsed;
+
+      if (typeof current === "string") continue;
+      if (current && typeof current === "object") {
+        const record = current as Record<string, unknown>;
+        if (typeof record.status === "string" || Array.isArray(record.observations) || typeof record.photo_quality === "string") {
+          return sanitizeReview(record);
+        }
+        const nested = [record.review, record.result, record.output, record.data, record.response, record.content, record.text, record.json]
+          .find((item) => item !== undefined && item !== null);
+        if (nested === undefined) break;
+        current = nested;
+        continue;
+      }
+      break;
     }
   }
   return null;
@@ -219,8 +252,12 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
   const message = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined : undefined;
   if (message?.refusal) return json({ error: "CABEKU_CF_AI_REFUSAL: AI menolak memproses foto tersebut." }, 502);
 
-  const review = parseModelReview(message?.content);
-  if (!review) return json({ error: "CABEKU_CF_PARSE_ERROR: AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
+  const review = parseModelReview(message?.content ?? message?.response ?? message?.output);
+  if (!review) {
+    console.error("Cabeku parse error", JSON.stringify({ contentType: typeof message?.content, content: message?.content }));
+    return json({ error: "CABEKU_CF_PARSE_ERROR: AI merespons, tetapi format hasil tidak dapat dibaca." }, 502);
+  }
+
   if (review.photo_quality === "poor") {
     review.status = "Data Belum Cukup";
     review.confidence = Math.min(review.confidence, 45);
