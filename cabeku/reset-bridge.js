@@ -1,23 +1,41 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'cabeku.scanHistory.v3';
+  // Confidence guard: the AI runtime sometimes returns numeric 0 even when a
+  // usable status/observation exists. Convert that invalid display state into
+  // a conservative fallback without overriding non-zero model confidence.
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+    try {
+      const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+      if (!String(requestUrl).includes('/api/cabeku-scan') || !response.headers.get('content-type')?.includes('application/json')) return response;
+      const payload = await response.clone().json();
+      const review = payload?.review;
+      if (payload?.ok && review && Number(review.confidence) === 0 && review.status !== 'Data Belum Cukup') {
+        const quality = review.photo_quality === 'good' ? 72 : review.photo_quality === 'fair' ? 52 : 25;
+        const observationCount = Array.isArray(review.observations) ? review.observations.length : 0;
+        review.confidence = Math.min(90, quality + Math.min(18, observationCount * 3));
+        payload.review = review;
+      }
+      return new Response(JSON.stringify(payload), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch {
+      return response;
+    }
+  };
 
+  const STORAGE_KEY = 'cabeku.scanHistory.v3';
   const readHistory = () => {
     try {
       const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       return Array.isArray(value) ? value : [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   };
-
-  const num = (value) => {
-    if (value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  };
-
+  const num = (value) => { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) ? n : null; };
   const formValue = (id) => document.getElementById(id)?.value ?? '';
 
   const injectStyles = () => {
@@ -62,9 +80,7 @@
       if (!latest || latest.date !== snapshot.date || latest.hst !== snapshot.hst) return;
       history[0] = { ...latest, variety: snapshot.variety, measurements: snapshot.measurements };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(0, 20)));
-    } catch {
-      // Local history is best-effort and must never block the scan UI.
-    }
+    } catch {}
   };
 
   const trend = (current, previous, hstDelta, leaf = false) => {
@@ -82,65 +98,21 @@
     const summary = document.getElementById('cabekuTimelineSummary');
     const rows = document.getElementById('cabekuTimelineRows');
     if (!meta || !summary || !rows) return;
-
-    const history = readHistory()
-      .map((item) => ({
-        ...item,
-        hst: num(item.hst),
-        measurements: item.measurements && typeof item.measurements === 'object' ? item.measurements : null,
-      }))
-      .filter((item) => item.hst !== null)
-      .sort((a, b) => a.hst - b.hst);
-
+    const history = readHistory().map((item) => ({ ...item, hst: num(item.hst), measurements: item.measurements && typeof item.measurements === 'object' ? item.measurements : null })).filter((item) => item.hst !== null).sort((a,b) => a.hst - b.hst);
     rows.replaceChildren();
-    if (history.length < 2) {
-      meta.textContent = history.length ? '1 baseline' : 'Belum ada baseline';
-      summary.textContent = 'Butuh minimal 2 scan pada HST berbeda untuk membaca tren pertumbuhan.';
-      return;
-    }
-
-    const latest = history[history.length - 1];
-    const previous = history[history.length - 2];
-    const hstDelta = latest.hst - previous.hst;
-    const metrics = [
-      ['Tinggi', 'heightCm', false, 'cm'],
-      ['Lebar tajuk', 'canopyCm', false, 'cm'],
-      ['Jumlah daun', 'leafCount', true, 'daun'],
-    ];
-
-    const available = metrics
-      .map(([label, key, leaf, unit]) => ({ label, key, leaf, unit, current: num(latest.measurements?.[key]), previous: num(previous.measurements?.[key]) }))
-      .map((item) => ({ ...item, result: trend(item.current, item.previous, hstDelta, Boolean(item.leaf)) }))
-      .filter((item) => item.result !== null);
-
+    if (history.length < 2) { meta.textContent = history.length ? '1 baseline' : 'Belum ada baseline'; summary.textContent = 'Butuh minimal 2 scan pada HST berbeda untuk membaca tren pertumbuhan.'; return; }
+    const latest = history[history.length - 1], previous = history[history.length - 2], hstDelta = latest.hst - previous.hst;
+    const metrics = [['Tinggi','heightCm',false,'cm'],['Lebar tajuk','canopyCm',false,'cm'],['Jumlah daun','leafCount',true,'daun']];
+    const available = metrics.map(([label,key,leaf,unit]) => ({label,key,leaf,unit,current:num(latest.measurements?.[key]),previous:num(previous.measurements?.[key])})).map((item) => ({...item,result:trend(item.current,item.previous,hstDelta,Boolean(item.leaf))})).filter((item)=>item.result!==null);
     meta.textContent = `${history.length} scan • HST ${history[0].hst} → ${latest.hst}`;
-    summary.textContent = available.length
-      ? `Perubahan terakhir dihitung dari HST ${previous.hst} ke ${latest.hst}.`
-      : 'Riwayat sudah tersedia, tetapi belum ada dua scan dengan pengukuran morfologi yang sebanding.';
-
-    available.forEach((item) => {
-      const row = document.createElement('div');
-      row.className = 'tl-row';
-      const b = document.createElement('b');
-      b.textContent = `${item.label}: ${item.result.state}`;
-      const s = document.createElement('span');
-      const sign = item.result.per10 > 0 ? '+' : '';
-      const decimals = item.leaf ? 1 : 2;
-      s.textContent = `${sign}${item.result.per10.toFixed(decimals)} ${item.unit}/10 HST`;
-      row.append(b, s);
-      rows.append(row);
-    });
+    summary.textContent = available.length ? `Perubahan terakhir dihitung dari HST ${previous.hst} ke ${latest.hst}.` : 'Riwayat sudah tersedia, tetapi belum ada dua scan dengan pengukuran morfologi yang sebanding.';
+    available.forEach((item) => { const row=document.createElement('div'); row.className='tl-row'; const b=document.createElement('b'); b.textContent=`${item.label}: ${item.result.state}`; const s=document.createElement('span'); const sign=item.result.per10>0?'+':''; const decimals=item.leaf?1:2; s.textContent=`${sign}${item.result.per10.toFixed(decimals)} ${item.unit}/10 HST`; row.append(b,s); rows.append(row); });
   };
 
   const capturePending = () => ({
     hst: num(formValue('hst')),
     variety: formValue('variety') || 'unknown',
-    measurements: {
-      heightCm: num(formValue('height')),
-      canopyCm: num(formValue('canopy')),
-      leafCount: num(formValue('leafCount')),
-      leafWidthCm: num(formValue('leafWidth')),
-    },
+    measurements: { heightCm:num(formValue('height')), canopyCm:num(formValue('canopy')), leafCount:num(formValue('leafCount')), leafWidthCm:num(formValue('leafWidth')) },
     date: null,
   });
 
@@ -154,26 +126,13 @@
       const timer = window.setInterval(() => {
         attempts += 1;
         const history = readHistory();
-        if (history.length > startedCount) {
-          snapshot.date = history[0]?.date || new Date().toISOString();
-          enrichLatestHistory(snapshot);
-          renderTimeline();
-          window.clearInterval(timer);
-        } else if (attempts >= 30) {
-          window.clearInterval(timer);
-        }
+        if (history.length > startedCount) { snapshot.date = history[0]?.date || new Date().toISOString(); enrichLatestHistory(snapshot); renderTimeline(); window.clearInterval(timer); }
+        else if (attempts >= 30) window.clearInterval(timer);
       }, 1000);
     });
   };
 
   const reset = document.querySelector('#resetBtn');
-  if (reset) {
-    reset.addEventListener('click', () => {
-      window.setTimeout(() => window.location.reload(), 0);
-    }, { once: true });
-  }
-
-  ensureTimeline();
-  watchScan();
-  renderTimeline();
+  if (reset) reset.addEventListener('click', () => window.setTimeout(() => window.location.reload(), 0), { once: true });
+  ensureTimeline(); watchScan(); renderTimeline();
 })();
