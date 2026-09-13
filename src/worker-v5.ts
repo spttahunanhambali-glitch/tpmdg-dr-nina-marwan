@@ -1,25 +1,535 @@
-import { assessGrowth, growthReferenceMeta, type GrowthVariety, type GrowthMeasures } from "../functions/api/growth-engine";
+import {
+  assessGrowth,
+  growthReferenceMeta,
+  type GrowthVariety,
+} from "../functions/api/growth-engine";
 
-type Env={ASSETS:{fetch(r:Request):Promise<Response>};AI:{run(model:string,input:Record<string,unknown>):Promise<unknown>}};
-type Ctx={hst?:unknown;soil?:unknown;fertilization?:unknown;symptoms?:unknown;variety?:unknown;measurements?:unknown};
-type Body={imageDataUrl?:unknown;imageDataUrls?:unknown;context?:Ctx};
-type Review={photo_quality:"good"|"fair"|"poor";status:"Sehat"|"Perlu Diamati"|"Perlu Pemeriksaan"|"Data Belum Cukup";confidence:number;conclusion:string;observations:string[];caution:string;next_steps:string[]};
-const MODEL="@cf/meta/llama-4-scout-17b-16e-instruct";
-const RUNTIME="cabeku-worker-v6-vision-prompt-fix-2026-09-13";
-const STATUSES=["Sehat","Perlu Diamati","Perlu Pemeriksaan","Data Belum Cukup"] as const;
-const QUALITIES=["good","fair","poor"] as const;
-const SCHEMA={type:"object",additionalProperties:false,properties:{photo_quality:{type:"string",enum:["good","fair","poor"]},status:{type:"string",enum:[...STATUSES]},confidence:{type:"number",minimum:0,maximum:100},conclusion:{type:"string"},observations:{type:"array",items:{type:"string"}},caution:{type:"string"},next_steps:{type:"array",items:{type:"string"}}},required:["photo_quality","status","confidence","conclusion","observations","caution","next_steps"]};
-const response=(data:unknown,status=200)=>Response.json(data,{status,headers:{"content-type":"application/json;charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","x-cabeku-runtime":RUNTIME}});
-const clamp=(v:unknown)=>{const n=Number(v);return Number.isFinite(n)?Math.max(0,Math.min(100,Math.round(n))):0};
-const asText=(v:unknown,n=600)=>typeof v==="string"?v.trim().slice(0,n):"";
-const asList=(v:unknown,n=6)=>Array.isArray(v)?v.filter((x):x is string=>typeof x==="string").map(x=>x.trim()).filter(Boolean).slice(0,n):[];
-const parseJson=(v:unknown):unknown|null=>{if(v&&typeof v==="object")return v;if(typeof v!=="string")return null;const s=v.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();try{const p=JSON.parse(s);return typeof p==="string"?parseJson(p):p}catch{}for(let a=0;a<s.length;a++){if(s[a]!=="{")continue;let d=0,q=false,e=false;for(let i=a;i<s.length;i++){const c=s[i];if(q){if(e)e=false;else if(c==="\\")e=true;else if(c==='"')q=false;continue}if(c==='"'){q=true;continue}if(c==="{")d++;else if(c==='}'&&--d===0){try{return JSON.parse(s.slice(a,i+1))}catch{}break}}}return null};
-function review(v:unknown,depth=0):Review|null{if(depth>8)return null;const p=parseJson(v);if(p==null)return null;if(Array.isArray(p)){for(const x of p){const r=review(x,depth+1);if(r)return r}return null}if(typeof p!=="object")return review(p,depth+1);const o=p as Record<string,unknown>;const status=o.status??o.Status??o.overall_status;const quality=o.photo_quality??o.photoQuality??o.quality;if(typeof status==="string"&&(STATUSES as readonly string[]).includes(status)&&typeof quality==="string"&&(QUALITIES as readonly string[]).includes(quality)){return{photo_quality:quality as Review["photo_quality"],status:status as Review["status"],confidence:clamp(o.confidence??o.confidence_score??o.confidenceScore),conclusion:asText(o.conclusion??o.summary??o.kesimpulan)||"Belum ada kesimpulan yang cukup kuat dari foto.",observations:asList(o.observations??o.visual_observations??o.pengamatan),caution:asText(o.caution??o.warning??o.catatan,500)||"Hasil ini adalah pemeriksaan visual awal dan bukan diagnosis penyakit.",next_steps:asList(o.next_steps??o.nextSteps??o.langkah_berikutnya,5)}}for(const k of ["review","result","response","output","data","content","message","json"]){if(k in o){const r=review(o[k],depth+1);if(r)return r}}for(const x of Object.values(o)){const r=review(x,depth+1);if(r)return r}return null}
-const prompt=(c:Ctx|undefined,n:number)=>{const x=c??{};const s=Array.isArray(x.symptoms)?x.symptoms.filter((v):v is string=>typeof v==="string").join(", "):"—";return[`Anda adalah Cabeku, pemeriksaan visual awal tanaman cabai Indonesia.`,`Analisis foto tanaman yang diberikan. Jika ada lebih dari satu foto dalam satu request, perlakukan sebagai satu kasus.`,`Hanya tuliskan ciri yang benar-benar terlihat. Jangan mendiagnosis penyakit/patogen dan jangan memberi dosis pupuk/pestisida.`,`Gunakan status Sehat, Perlu Diamati, Perlu Pemeriksaan, atau Data Belum Cukup.`,`Jangan memilih Data Belum Cukup hanya karena HST, tanah, pupuk, atau gejala belum diisi. Gunakan Data Belum Cukup hanya jika foto/objek memang tidak cukup jelas untuk observasi visual.`,`Untuk foto yang jelas, berikan sekurang-kurangnya 1 observasi visual yang nyata dan confidence 1-100. Jangan menggunakan confidence 0 untuk foto yang jelas; 0 hanya untuk kegagalan nyata membaca kasus.`,`Nilai fase bibit/vegetatif boleh diberikan dari ciri visual tanpa mengarang HST.`,`Kembalikan JSON tunggal tanpa markdown dengan field photo_quality,status,confidence,conclusion,observations,caution,next_steps.`,`Konteks: jumlah foto=${n}; HST=${String(x.hst??"—")}; varietas=${String(x.variety??"—")}; tanah=${String(x.soil??"—")}; pupuk=${String(x.fertilization??"—")}; gejala=${s}.`].join("\n")};
-const getImages=(b:Body)=>{const a=Array.isArray(b.imageDataUrls)?b.imageDataUrls:typeof b.imageDataUrl==="string"?[b.imageDataUrl]:[];return a.filter((x):x is string=>typeof x==="string").slice(0,5)};
-const validImage=(v:string)=>/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)&&v.length<=7_000_000;
-async function ai(env:Env,c:Ctx|undefined,imgs:string[]){const base={prompt:prompt(c,imgs.length),image:imgs[0],max_tokens:900,temperature:.1,stream:false};try{const first=await env.AI.run(MODEL,{...base,guided_json:SCHEMA});const r=review(first);if(r)return r}catch(e){console.warn("Cabeku guided JSON failed",e instanceof Error?e.message:String(e))}const second=await env.AI.run(MODEL,base);const r=review(second);if(r)return r;throw new Error("CABEKU_AI_RESPONSE_UNPARSABLE")}
-const growth=(c:Ctx|undefined)=>{const n=(v:unknown,m:number)=>{if(v===null||v===undefined||v==="")return null;const x=Number(v);return Number.isFinite(x)&&x>=0&&x<=m?x:null};const vv=typeof c?.variety==="string"?c.variety:"unknown";const variety:GrowthVariety=vv==="rawit"||vv==="merah"||vv==="keriting"?vv:"unknown";const m=c?.measurements&&typeof c.measurements==="object"?c.measurements as Record<string,unknown>:{};return{hst:n(c?.hst,500),variety,measures:{heightCm:n(m.heightCm,500),canopyCm:n(m.canopyCm,500),leafCount:n(m.leafCount,1000),leafWidthCm:n(m.leafWidthCm,100)}}};
-async function scan(req:Request,env:Env){if(req.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"Content-Type"}});if(req.method!=="POST")return response({error:"Method not allowed"},405);let body:Body;try{body=await req.json() as Body}catch{return response({error:"Format data tidak valid."},400)}const imgs=getImages(body);if(!imgs.length||imgs.some(x=>!validImage(x)))return response({error:"Foto tidak valid. Gunakan JPG, PNG, atau WebP."},400);try{const r=await ai(env,body.context,imgs);const visual=r.photo_quality==="poor"?{...r,status:"Data Belum Cukup" as const,confidence:Math.min(r.confidence,45),conclusion:"Foto belum cukup jelas untuk menarik kesimpulan visual yang bertanggung jawab.",next_steps:["Ambil foto dengan cahaya cukup dan fokus","Tampilkan satu tanaman utama"]}:r;const g=growth(body.context);const ga=assessGrowth(g.hst,g.variety,g.measures);return response({ok:true,runtime:RUNTIME,review:visual,growth:ga,audit:{engine:"cabeku-growth-engine-v1",reference:growthReferenceMeta(),benchmarkSource:ga.benchmark?.sourceId??null}})}catch(e){console.error("Cabeku scan error",e instanceof Error?e.message:String(e));return response({error:"Pemeriksaan AI gagal atau respons AI tidak dapat dibaca.",runtime:RUNTIME},502)}}
-async function page(req:Request,env:Env){const r=await env.ASSETS.fetch(new Request(new URL("/cabeku/index.html",req.url),req));if(!r.ok)return new Response("Cabeku page asset tidak ditemukan.",{status:404});const s=await r.text();const add=["/cabeku/multi-photo.js","/cabeku/reset-bridge.js"].filter(x=>!s.includes(x)).map(x=>`<script src="${x}" defer></script>`).join("");return add?new Response(s.replace("</body>",`${add}</body>`),r):new Response(s,r)}
-export default{async fetch(req:Request,env:Env){const u=new URL(req.url);if(u.pathname==="/api/cabeku-scan")return scan(req,env);if(u.pathname==="/api/cabeku-health")return response({ok:true,service:"cabeku",runtime:RUNTIME,model:MODEL,engine:"cabeku-growth-engine-v1"});if(u.pathname.startsWith("/api/"))return response({error:"API endpoint tidak ditemukan."},404);if(["/cabeku","/cabeku/","/cabeku/index.html","/serba-serbi/cabeku","/serba-serbi/cabeku/","/serba-serbi/cabeku/index.html"].includes(u.pathname))return page(req,env);return env.ASSETS.fetch(req)}} satisfies ExportedHandler<Env>;
+type Env = {
+  ASSETS: { fetch(r: Request): Promise<Response> };
+  AI: { run(model: string, input: Record<string, unknown>): Promise<unknown> };
+};
+
+type Ctx = {
+  hst?: unknown;
+  soil?: unknown;
+  fertilization?: unknown;
+  symptoms?: unknown;
+  variety?: unknown;
+  measurements?: unknown;
+};
+
+type Body = {
+  imageDataUrl?: unknown;
+  imageDataUrls?: unknown;
+  context?: Ctx;
+};
+
+type Status = "Sehat" | "Perlu Diamati" | "Perlu Pemeriksaan" | "Data Belum Cukup";
+type Quality = "good" | "fair" | "poor";
+
+type Review = {
+  photo_quality: Quality;
+  status: Status;
+  confidence: number;
+  conclusion: string;
+  observations: string[];
+  caution: string;
+  next_steps: string[];
+};
+
+type PhotoDiagnostic = {
+  image_index: number;
+  ai_called: boolean;
+  ai_response_received: boolean;
+  parsed: boolean;
+  parser_status: "ok" | "unparsed";
+  confidence_source: "model" | "default_zero_after_parse_failure" | "missing";
+  output_type: string;
+  response_keys: string[];
+  raw_excerpt: string;
+  error: string | null;
+};
+
+const MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+const RUNTIME = "cabeku-worker-v7-vision-diagnostic-2026-09-13";
+const STATUSES = ["Sehat", "Perlu Diamati", "Perlu Pemeriksaan", "Data Belum Cukup"] as const;
+const QUALITIES = ["good", "fair", "poor"] as const;
+
+const SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    photo_quality: { type: "string", enum: [...QUALITIES] },
+    status: { type: "string", enum: [...STATUSES] },
+    confidence: { type: "number", minimum: 1, maximum: 100 },
+    conclusion: { type: "string" },
+    observations: { type: "array", items: { type: "string" } },
+    caution: { type: "string" },
+    next_steps: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "photo_quality",
+    "status",
+    "confidence",
+    "conclusion",
+    "observations",
+    "caution",
+    "next_steps",
+  ],
+} as const;
+
+const response = (data: unknown, status = 200) =>
+  Response.json(data, {
+    status,
+    headers: {
+      "content-type": "application/json;charset=utf-8",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+      "x-cabeku-runtime": RUNTIME,
+    },
+  });
+
+const clampConfidence = (value: unknown): number => {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
+};
+
+const asText = (value: unknown, max = 600): string =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
+
+const asList = (value: unknown, max = 6): string[] =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, max)
+    : [];
+
+const parseJson = (value: unknown): unknown | null => {
+  if (value !== null && typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+
+  const source = value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(source) as unknown;
+    return typeof parsed === "string" ? parseJson(parsed) : parsed;
+  } catch {
+    // Continue with tolerant object extraction below.
+  }
+
+  for (let start = 0; start < source.length; start += 1) {
+    if (source[start] !== "{") continue;
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+
+    for (let index = start; index < source.length; index += 1) {
+      const char = source[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') {
+        quoted = true;
+        continue;
+      }
+      if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(source.slice(start, index + 1)) as unknown;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+const extractCandidate = (value: unknown, depth = 0): unknown => {
+  if (depth > 8 || value === null || value === undefined) return null;
+  const parsed = parseJson(value);
+  if (parsed === null) return null;
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const candidate = extractCandidate(item, depth + 1);
+      if (candidate) return candidate;
+    }
+    return null;
+  }
+  if (typeof parsed !== "object") return null;
+
+  const object = parsed as Record<string, unknown>;
+  const status = object.status ?? object.Status ?? object.overall_status;
+  const quality = object.photo_quality ?? object.photoQuality ?? object.quality;
+
+  if (
+    typeof status === "string" &&
+    (STATUSES as readonly string[]).includes(status) &&
+    typeof quality === "string" &&
+    (QUALITIES as readonly string[]).includes(quality)
+  ) {
+    return object;
+  }
+
+  for (const key of ["review", "result", "response", "output", "data", "content", "message", "json"]) {
+    if (key in object) {
+      const candidate = extractCandidate(object[key], depth + 1);
+      if (candidate) return candidate;
+    }
+  }
+
+  for (const nested of Object.values(object)) {
+    const candidate = extractCandidate(nested, depth + 1);
+    if (candidate) return candidate;
+  }
+  return null;
+};
+
+const normalizeReview = (value: unknown): Review | null => {
+  const candidate = extractCandidate(value);
+  if (!candidate || typeof candidate !== "object") return null;
+  const object = candidate as Record<string, unknown>;
+  const status = object.status ?? object.Status ?? object.overall_status;
+  const quality = object.photo_quality ?? object.photoQuality ?? object.quality;
+  const confidenceValue = object.confidence ?? object.confidence_score ?? object.confidenceScore;
+
+  if (
+    typeof status !== "string" ||
+    !(STATUSES as readonly string[]).includes(status) ||
+    typeof quality !== "string" ||
+    !(QUALITIES as readonly string[]).includes(quality)
+  ) {
+    return null;
+  }
+
+  return {
+    photo_quality: quality as Quality,
+    status: status as Status,
+    confidence: clampConfidence(confidenceValue),
+    conclusion:
+      asText(object.conclusion ?? object.summary ?? object.kesimpulan) ||
+      "Belum ada kesimpulan yang cukup kuat dari foto.",
+    observations: asList(object.observations ?? object.visual_observations ?? object.pengamatan),
+    caution:
+      asText(object.caution ?? object.warning ?? object.catatan, 500) ||
+      "Hasil ini adalah pemeriksaan visual awal dan bukan diagnosis penyakit.",
+    next_steps: asList(object.next_steps ?? object.nextSteps ?? object.langkah_berikutnya, 5),
+  };
+};
+
+const buildPrompt = (context: Ctx | undefined): string => {
+  const value = context ?? {};
+  const symptoms = Array.isArray(value.symptoms)
+    ? value.symptoms.filter((item): item is string => typeof item === "string").join(", ")
+    : "—";
+
+  return [
+    "Anda adalah Cabeku, pemeriksaan visual awal tanaman cabai Indonesia.",
+    "Analisis SATU foto tanaman yang diberikan.",
+    "Hanya tuliskan ciri yang benar-benar terlihat pada foto.",
+    "Jangan mendiagnosis penyakit atau patogen dan jangan memberi dosis pupuk atau pestisida.",
+    "Gunakan status Sehat, Perlu Diamati, Perlu Pemeriksaan, atau Data Belum Cukup.",
+    "Jangan memilih Data Belum Cukup hanya karena HST, tanah, pupuk, varietas, atau gejala belum diisi.",
+    "Gunakan Data Belum Cukup hanya jika objek tanaman tidak terlihat cukup jelas untuk observasi visual.",
+    "Jika foto jelas, wajib berikan sedikitnya satu observasi visual nyata dan confidence 1-100.",
+    "Confidence 0 tidak diperbolehkan untuk foto yang jelas.",
+    "Fase bibit atau vegetatif boleh disebut berdasarkan ciri visual tanpa mengarang HST.",
+    "Kembalikan JSON tunggal tanpa markdown dengan field photo_quality,status,confidence,conclusion,observations,caution,next_steps.",
+    `Konteks lapangan: HST=${String(value.hst ?? "—")}; varietas=${String(value.variety ?? "—")}; tanah=${String(value.soil ?? "—")}; pupuk=${String(value.fertilization ?? "—")}; gejala=${symptoms}.`,
+  ].join("\n");
+};
+
+const getImages = (body: Body): string[] => {
+  const values = Array.isArray(body.imageDataUrls)
+    ? body.imageDataUrls
+    : typeof body.imageDataUrl === "string"
+      ? [body.imageDataUrl]
+      : [];
+
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .slice(0, 5);
+};
+
+const validImage = (value: string): boolean =>
+  /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 7_000_000;
+
+const describeAiOutput = (value: unknown) => {
+  if (value === null || value === undefined) return { type: "null", keys: [] as string[] };
+  if (Array.isArray(value)) return { type: "array", keys: [] as string[] };
+  if (typeof value === "string") return { type: "string", keys: [] as string[] };
+  if (typeof value === "object") {
+    return {
+      type: "object",
+      keys: Object.keys(value as Record<string, unknown>).slice(0, 20),
+    };
+  }
+  return { type: typeof value, keys: [] as string[] };
+};
+
+const rawExcerpt = (value: unknown): string => {
+  try {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value);
+    return serialized ? serialized.slice(0, 700) : "";
+  } catch {
+    return "";
+  }
+};
+
+const analyzeOne = async (
+  env: Env,
+  context: Ctx | undefined,
+  image: string,
+  imageIndex: number,
+): Promise<{ review: Review | null; diagnostic: PhotoDiagnostic }> => {
+  let aiOutput: unknown = null;
+  let aiError: string | null = null;
+
+  try {
+    const input = {
+      prompt: buildPrompt(context),
+      image,
+      guided_json: SCHEMA,
+      max_tokens: 900,
+      temperature: 0.1,
+      stream: false,
+    };
+
+    aiOutput = await env.AI.run(MODEL, input);
+  } catch (error) {
+    aiError = error instanceof Error ? error.message : String(error);
+  }
+
+  const review = normalizeReview(aiOutput);
+  const outputDescription = describeAiOutput(aiOutput);
+  const parsedConfidence = review ? review.confidence : 0;
+
+  return {
+    review,
+    diagnostic: {
+      image_index: imageIndex + 1,
+      ai_called: true,
+      ai_response_received: aiOutput !== null,
+      parsed: review !== null,
+      parser_status: review ? "ok" : "unparsed",
+      confidence_source: review
+        ? "model"
+        : aiError
+          ? "missing"
+          : "default_zero_after_parse_failure",
+      output_type: outputDescription.type,
+      response_keys: outputDescription.keys,
+      raw_excerpt: rawExcerpt(aiOutput),
+      error: aiError,
+    },
+  };
+};
+
+const qualityToVisual = (review: Review): Review => {
+  if (review.photo_quality !== "poor") return review;
+  return {
+    ...review,
+    status: "Data Belum Cukup",
+    confidence: Math.min(review.confidence || 1, 45),
+    conclusion: "Foto belum cukup jelas untuk menarik kesimpulan visual yang bertanggung jawab.",
+    next_steps: ["Ambil foto dengan cahaya cukup dan fokus", "Tampilkan satu tanaman utama"],
+  };
+};
+
+const mergeReviews = (reviews: Review[]): Review => {
+  if (!reviews.length) {
+    return {
+      photo_quality: "poor",
+      status: "Data Belum Cukup",
+      confidence: 0,
+      conclusion: "Tidak ada hasil visual yang dapat dibaca dari AI.",
+      observations: [],
+      caution: "Pemeriksaan visual belum berhasil menghasilkan data yang dapat dibaca.",
+      next_steps: ["Ulangi pemeriksaan dengan foto tanaman yang jelas"],
+    };
+  }
+
+  const severity: Record<Status, number> = {
+    Sehat: 0,
+    "Perlu Diamati": 1,
+    "Perlu Pemeriksaan": 2,
+    "Data Belum Cukup": 3,
+  };
+  const overall = reviews.reduce((best, current) =>
+    severity[current.status] > severity[best.status] ? current : best,
+  );
+  const averageConfidence = Math.round(
+    reviews.reduce((sum, review) => sum + review.confidence, 0) / reviews.length,
+  );
+  const uniqueObservations = [...new Set(reviews.flatMap((review) => review.observations))].slice(0, 10);
+  const uniqueNextSteps = [...new Set(reviews.flatMap((review) => review.next_steps))].slice(0, 6);
+
+  return {
+    photo_quality: reviews.some((review) => review.photo_quality === "good") ? "good" : "fair",
+    status: overall.status,
+    confidence: averageConfidence,
+    conclusion: overall.conclusion,
+    observations: uniqueObservations,
+    caution: reviews.map((review) => review.caution).filter(Boolean).slice(0, 2).join(" "),
+    next_steps: uniqueNextSteps,
+  };
+};
+
+const growth = (context: Ctx | undefined) => {
+  const numeric = (value: unknown, max: number): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const result = Number(value);
+    return Number.isFinite(result) && result >= 0 && result <= max ? result : null;
+  };
+  const rawVariety = typeof context?.variety === "string" ? context.variety : "unknown";
+  const variety: GrowthVariety = ["rawit", "merah", "keriting"].includes(rawVariety)
+    ? (rawVariety as GrowthVariety)
+    : "unknown";
+  const measures = context?.measurements && typeof context.measurements === "object"
+    ? (context.measurements as Record<string, unknown>)
+    : {};
+
+  return {
+    hst: numeric(context?.hst, 500),
+    variety,
+    measures: {
+      heightCm: numeric(measures.heightCm, 500),
+      canopyCm: numeric(measures.canopyCm, 500),
+      leafCount: numeric(measures.leafCount, 1000),
+      leafWidthCm: numeric(measures.leafWidthCm, 100),
+    },
+  };
+};
+
+async function scan(req: Request, env: Env): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "POST, OPTIONS",
+        "access-control-allow-headers": "Content-Type",
+      },
+    });
+  }
+  if (req.method !== "POST") return response({ error: "Method not allowed" }, 405);
+
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return response({ error: "Format data tidak valid." }, 400);
+  }
+
+  const images = getImages(body);
+  if (!images.length || images.some((image) => !validImage(image))) {
+    return response({ error: "Foto tidak valid. Gunakan JPG, PNG, atau WebP." }, 400);
+  }
+
+  try {
+    const results: Array<{ review: Review; diagnostic: PhotoDiagnostic }> = [];
+
+    for (let index = 0; index < images.length; index += 1) {
+      const result = await analyzeOne(env, body.context, images[index], index);
+      if (result.review) results.push({ review: qualityToVisual(result.review), diagnostic: result.diagnostic });
+      else results.push({
+        review: {
+          photo_quality: "poor",
+          status: "Data Belum Cukup",
+          confidence: 0,
+          conclusion: "Respons AI tidak dapat dibaca. Ini adalah kegagalan pemrosesan, bukan penilaian bahwa tanaman buruk.",
+          observations: [],
+          caution: "Pemeriksaan visual gagal diparse sehingga hasil tidak boleh dianggap sebagai diagnosis atau penilaian kesehatan tanaman.",
+          next_steps: ["Ulangi pemeriksaan dengan foto yang sama", "Periksa diagnostic parser/runtime"],
+        },
+        diagnostic: result.diagnostic,
+      });
+    }
+
+    const reviewList = results.map((item) => item.review);
+    const merged = mergeReviews(reviewList.filter((review) => review.status !== "Data Belum Cukup" || review.observations.length > 0));
+    const successfulCount = results.filter((item) => item.diagnostic.parsed).length;
+    const failedParseCount = results.length - successfulCount;
+    const g = growth(body.context);
+    const growthAssessment = assessGrowth(g.hst, g.variety, g.measures);
+
+    return response({
+      ok: true,
+      runtime: RUNTIME,
+      model: MODEL,
+      review: merged,
+      reviews: reviewList,
+      growth: growthAssessment,
+      audit: {
+        engine: "cabeku-growth-engine-v1",
+        reference: growthReferenceMeta(),
+        benchmarkSource: growthAssessment.benchmark?.sourceId ?? null,
+        photo_count: images.length,
+        successful_ai_parse: successfulCount,
+        failed_ai_parse: failedParseCount,
+        diagnostic: results.map((item) => item.diagnostic),
+      },
+    });
+  } catch (error) {
+    console.error("Cabeku scan error", error instanceof Error ? error.message : String(error));
+    return response({
+      error: "Pemeriksaan AI gagal atau respons AI tidak dapat diproses.",
+      runtime: RUNTIME,
+      model: MODEL,
+    }, 502);
+  }
+}
+
+async function page(req: Request, env: Env): Promise<Response> {
+  const asset = await env.ASSETS.fetch(new Request(new URL("/cabeku/index.html", req.url), req));
+  if (!asset.ok) return new Response("Cabeku page asset tidak ditemukan.", { status: 404 });
+  const html = await asset.text();
+  const scripts = ["/cabeku/multi-photo.js", "/cabeku/reset-bridge.js"]
+    .filter((path) => !html.includes(path))
+    .map((path) => `<script src="${path}" defer></script>`)
+    .join("");
+  return scripts
+    ? new Response(html.replace("</body>", `${scripts}</body>`), asset)
+    : new Response(html, asset);
+}
+
+export default {
+  async fetch(req: Request, env: Env): Promise<Response> {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/cabeku-scan") return scan(req, env);
+    if (url.pathname === "/api/cabeku-health") {
+      return response({
+        ok: true,
+        service: "cabeku",
+        runtime: RUNTIME,
+        model: MODEL,
+        engine: "cabeku-growth-engine-v1",
+      });
+    }
+    if (url.pathname.startsWith("/api/")) return response({ error: "API endpoint tidak ditemukan." }, 404);
+    if ([
+      "/cabeku",
+      "/cabeku/",
+      "/cabeku/index.html",
+      "/serba-serbi/cabeku",
+      "/serba-serbi/cabeku/",
+      "/serba-serbi/cabeku/index.html",
+    ].includes(url.pathname)) {
+      return page(req, env);
+    }
+    return env.ASSETS.fetch(req);
+  },
+} satisfies ExportedHandler<Env>;
