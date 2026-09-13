@@ -6,6 +6,9 @@ on:
     paths:
       - 'src/**'
       - 'cabeku/**'
+      - 'serba-serbi/cabeku/**'
+      - 'functions/api/cabeku-scan.ts'
+      - 'functions/api/cabeku-health.ts'
       - 'functions/api/growth-engine.ts'
       - 'wrangler.jsonc'
       - 'package.json'
